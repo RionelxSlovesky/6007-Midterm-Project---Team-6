@@ -1,31 +1,34 @@
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import from_json, col
-from pyspark.sql.types import StructType, StringType
+import json
+import os
+import time
+from kafka import KafkaConsumer
+import pandas as pd
 
-spark = SparkSession.builder \
-    .appName("KafkaTweetStream") \
-    .getOrCreate()
+KAFKA_TOPIC = "twitter_stream"
+KAFKA_SERVER = "localhost:9092"
 
-schema = StructType() \
-    .add("tweet_id", StringType()) \
-    .add("text", StringType()) \
-    .add("sentiment", StringType()) \
-    .add("topic", StringType())
+OUTPUT_DIR = "tweet_data_output"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-df_kafka = spark.readStream \
-    .format("kafka") \
-    .option("kafka.bootstrap.servers", "localhost:9092") \
-    .option("subscribe", "twitter_stream") \
-    .load()
+consumer = KafkaConsumer(
+    KAFKA_TOPIC,
+    bootstrap_servers=KAFKA_SERVER,
+    auto_offset_reset="earliest",
+    value_deserializer=lambda x: json.loads(x.decode("utf-8"))
+)
 
-df_parsed = df_kafka.selectExpr("CAST(value AS STRING)") \
-    .select(from_json(col("value"), schema).alias("data")) \
-    .select("data.*")
+print(f"Listening to Kafka topic '{KAFKA_TOPIC}'... Saving to {OUTPUT_DIR}/")
 
-query = df_parsed.writeStream \
-    .outputMode("append") \
-    .format("console") \
-    .option("truncate", False) \
-    .start()
+counter = 0
+for message in consumer:
+    tweet = message.value
 
-query.awaitTermination()
+    df = pd.DataFrame([tweet])
+
+    filename = os.path.join(OUTPUT_DIR, f"tweet_{counter}.json")
+    df.to_json(filename, orient="records", lines=True)
+
+    print(f"📄 Saved: {filename}")
+    counter += 1
+
+    time.sleep(1)
