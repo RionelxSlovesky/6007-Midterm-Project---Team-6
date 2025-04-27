@@ -2,3 +2,4 @@
 __pycache__/
 *.pyc
 tweet_data_output/
+preprocessed_tweets/
